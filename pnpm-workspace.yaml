@@ -1,0 +1,11 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "libs/*"
+  - "examples/*"
+allowBuilds:
+  '@nestjs/core': true
+  '@scarf/scarf': false
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
