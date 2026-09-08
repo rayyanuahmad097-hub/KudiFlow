@@ -1,0 +1,201 @@
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { AggregationService } from './aggregation.service';
+import { SlippageService } from './slippage.service';
+import { ReliabilityService } from './reliability.service';
+import { RankingService } from './ranking.service';
+import { FailureRiskService } from './failure-risk.service';
+import { QuoteCacheService } from './quote-cache.service';
+import { BridgeStatusService } from './bridge-status.service';
+import { GetQuotesDto } from './dto';
+import {
+  NormalizedQuote,
+  QuoteResponse,
+  QuoteRequestParams,
+  RawBridgeQuote,
+} from './interfaces';
+import { BridgeStatus, RankingMode } from './enums';
+
+@Injectable()
+export class BridgeCompareService {
+  private readonly logger = new Logger(BridgeCompareService.name);
+
+  constructor(
+    private readonly aggregationService: AggregationService,
+    private readonly slippageService: SlippageService,
+    private readonly reliabilityService: ReliabilityService,
+    private readonly rankingService: RankingService,
+    private readonly failureRiskService: FailureRiskService,
+    private readonly quoteCacheService: QuoteCacheService,
+    private readonly bridgeStatusService: BridgeStatusService,
+  ) {}
+
+  /**
+   * Get all normalized, ranked quotes for a bridge request.
+   */
+  async getQuotes(dto: GetQuotesDto): Promise<QuoteResponse> {
+    const startTime = Date.now();
+    const params: QuoteRequestParams = {
+      sourceChain: dto.sourceChain,
+      destinationChain: dto.destinationChain,
+      sourceToken: dto.sourceToken,
+      destinationToken: dto.destinationToken ?? dto.sourceToken,
+      amount: dto.amount,
+      rankingMode: dto.rankingMode ?? RankingMode.BALANCED,
+      slippageTolerance: dto.slippageTolerance,
+    };
+
+    this.logger.log(
+      `Getting quotes: ${dto.sourceToken} ${dto.sourceChain}→${dto.destinationChain} ` +
+        `amount=${dto.amount} mode=${params.rankingMode}`,
+    );
+
+    const cacheKey = this.quoteCacheService.buildKey(params);
+    const cached = this.quoteCacheService.get(cacheKey);
+    if (cached) {
+      this.logger.log(`Returning cached quotes for key: ${cacheKey}`);
+      return cached;
+    }
+
+    const { quotes: rawQuotes, failedProviders } =
+      await this.aggregationService.fetchRawQuotes(params);
+
+    // Filter out quotes from offline bridges
+    const availableQuotes = rawQuotes.filter(
+      (quote) => !this.bridgeStatusService.isOffline(quote.bridgeId),
+    );
+
+    if (availableQuotes.length === 0 && rawQuotes.length > 0) {
+      this.logger.warn(
+        `All bridge quotes are offline. Total providers: ${rawQuotes.length}`,
+      );
+    }
+
+    const slippageMap = this.slippageService.batchEstimateSlippage(
+      availableQuotes,
+      dto.sourceToken,
+      dto.sourceChain,
+      dto.amount,
+    );
+
+    const bridgeIds = availableQuotes.map((q) => q.bridgeId);
+    const reliabilityMap =
+      this.reliabilityService.batchCalculateScores(bridgeIds);
+    const metricsMap = this.reliabilityService.batchGetMetrics(bridgeIds);
+
+    const normalizedQuotes: NormalizedQuote[] = availableQuotes.map((raw) =>
+      this.normalizeQuote(raw, params, slippageMap, reliabilityMap, metricsMap),
+    );
+
+    const rankedQuotes = this.rankingService.rankQuotes(
+      normalizedQuotes,
+      params.rankingMode,
+    );
+
+    const bestRoute = rankedQuotes[0];
+    if (!bestRoute) {
+      throw new NotFoundException(
+        'No valid routes found for the requested pair. Available bridges may be offline.',
+      );
+    }
+
+    const offlineBridgesCount = rawQuotes.length - availableQuotes.length;
+    const response: QuoteResponse = {
+      quotes: rankedQuotes,
+      bestRoute,
+      rankingMode: params.rankingMode,
+      requestParams: params,
+      totalProviders: rawQuotes.length + failedProviders,
+      successfulProviders: availableQuotes.length,
+      fetchDurationMs: Date.now() - startTime,
+      cacheHit: false,
+      offlineBridgesCount,
+    };
+
+
+    this.quoteCacheService.set(cacheKey, { ...response, cacheHit: true, cachedAt: new Date() });
+
+    this.logger.log(
+      `Returned ${rankedQuotes.length} quotes in ${response.fetchDurationMs}ms. ` +
+        `Best: ${bestRoute.bridgeName} score=${bestRoute.compositeScore}`,
+    );
+
+    return response;
+  }
+
+  /**
+   * Get a specific route's full details by bridgeId.
+   */
+  async getRouteDetails(
+    dto: GetQuotesDto,
+    bridgeId: string,
+  ): Promise<NormalizedQuote> {
+    const response = await this.getQuotes(dto);
+    const route = response.quotes.find((q) => q.bridgeId === bridgeId);
+
+    if (!route) {
+      throw new NotFoundException(`Route not found for bridge: ${bridgeId}`);
+    }
+
+    return route;
+  }
+
+  /**
+   * Get list of all supported bridges.
+   */
+  getSupportedBridges() {
+    return this.aggregationService.getAllProviders();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private normalizeQuote(
+    raw: RawBridgeQuote,
+    params: QuoteRequestParams,
+    slippageMap: Map<string, { expectedSlippage: number }>,
+    reliabilityMap: Map<string, number>,
+    metricsMap: Map<string, import('./interfaces').ReliabilityMetrics>,
+  ): NormalizedQuote {
+    const totalFeeUsd = raw.feesUsd + raw.gasCostUsd;
+    const slippage = slippageMap.get(raw.bridgeId);
+    const slippagePercent = slippage?.expectedSlippage ?? 0;
+    const reliabilityScore = reliabilityMap.get(raw.bridgeId) ?? 70;
+    const bridgeStatus = this.aggregationService.getBridgeStatus(raw.bridgeId);
+    const metrics = metricsMap.get(raw.bridgeId)!;
+
+    const { failureRisk, riskFactors } = this.failureRiskService.assessRisk(
+      reliabilityScore,
+      metrics,
+      slippagePercent,
+      bridgeStatus,
+    );
+
+    return {
+      bridgeId: raw.bridgeId,
+      bridgeName: raw.bridgeName,
+      sourceChain: params.sourceChain,
+      destinationChain: params.destinationChain,
+      sourceToken: params.sourceToken,
+      destinationToken: params.destinationToken ?? params.sourceToken,
+      inputAmount: params.amount,
+      outputAmount: parseFloat(raw.outputAmount.toFixed(6)),
+      totalFeeUsd: parseFloat(totalFeeUsd.toFixed(4)),
+      estimatedTimeSeconds: raw.estimatedTimeSeconds,
+      slippagePercent,
+      reliabilityScore,
+      compositeScore: 0, // assigned by RankingService
+      confidenceScore: 0, // assigned by RankingService
+      confidenceLevel: 'low' as const, // assigned by RankingService
+      failureRisk,
+      riskFactors,
+      rankingPosition: 0, // assigned by RankingService
+      bridgeStatus,
+      metadata: {
+        feesBreakdown: { protocolFee: raw.feesUsd, gasFee: raw.gasCostUsd },
+        steps: raw.steps,
+      },
+      fetchedAt: new Date(),
+    };
+  }
+}

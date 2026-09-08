@@ -1,0 +1,56 @@
+import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnalyticsService } from './analytics.service';
+import { AnalyticsController } from './analytics.controller';
+import { AnalyticsCollector } from './analytics.collector';
+import { AbandonmentTrackingService } from './abandonment-tracking.service';
+import { AbandonmentTrackingController } from './abandonment-tracking.controller';
+import { BridgeUsageHeatmapService } from './bridge-usage-heatmap.service';
+import { BridgeUsageHeatmapController } from './bridge-usage-heatmap.controller';
+import { MetricsStreamService } from './metrics-stream.service';
+import { MetricsStreamController } from './metrics-stream.controller';
+import { BridgeAnalytics } from './entities/bridge-analytics.entity';
+import { PerformanceMetricService } from './performance-metric.service';
+import { StellarAnalyticsController } from './stellar/stellar-analytics.controller';
+import { StellarAnalyticsService } from './stellar/stellar-analytics.service';
+
+/**
+ * Analytics Module
+ *
+ * Provides analytics functionality for KudiFlow including:
+ * - Aggregated metrics for bridge routes
+ * - Time-series data for trend analysis
+ * - Real-time data collection from transactions
+ * - REST API endpoints for analytics data
+ * - Quote abandonment tracking
+ * - Bridge usage heatmap data
+ * - Dedicated Stellar/Soroban bridge analytics endpoints
+ */
+@Module({
+  imports: [TypeOrmModule.forFeature([BridgeAnalytics])],
+  controllers: [
+    AnalyticsController,
+    AbandonmentTrackingController,
+    BridgeUsageHeatmapController,
+    MetricsStreamController,
+    StellarAnalyticsController,
+  ],
+  providers: [
+    AnalyticsService,
+    AnalyticsCollector,
+    AbandonmentTrackingService,
+    BridgeUsageHeatmapService,
+    MetricsStreamService,
+    PerformanceMetricService,
+    StellarAnalyticsService,
+  ],
+  exports: [
+    AnalyticsService,
+    AnalyticsCollector,
+    AbandonmentTrackingService,
+    BridgeUsageHeatmapService,
+    MetricsStreamService,
+    StellarAnalyticsService,
+  ],
+})
+export class AnalyticsModule {}

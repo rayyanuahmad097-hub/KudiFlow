@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "types": ["node", "jest"],
+    "paths": {
+      "@kudiflow/bridge-core": ["../../packages/utils/src"],
+      "@kudiflow/bridge-core/*": ["../../packages/utils/src/*"],
+      "@kudiflow/ui-components": ["../../packages/ui/src"],
+      "@kudiflow/ui-components/*": ["../../packages/ui/src/*"],
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "./src/**/*.ts"
+  ],
+  "exclude": [
+    "./src/**/*.spec.ts",
+    "./src/**/*.e2e-spec.ts",
+    "./src/webhook-support/**",
+    "./src/webhooks/**",
+    "./src/real-time-fee-aggregation/**",
+    "./src/reliability-score/**",
+    "./src/SDK-Debug/**",
+    "./src/dynamic-bridge-discovery/**",
+    "./src/transactions/retry/useRetryFeedback.ts",
+    "./src/custom-theme/**",
+    "./src/gas-estimation/**",
+    "./src/monotoring/**",
+    "./src/Analytics-Export/**",
+    "./src/bridge-compare/**",
+    "./src/bridge-providers/**",
+    "./src/bridge-recommendation/**"
+  ]
+}
