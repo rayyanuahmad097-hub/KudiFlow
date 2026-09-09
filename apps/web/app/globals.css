@@ -1,0 +1,24 @@
+/**
+ * Import Tailwind CSS
+ */
+@import 'tailwindcss';
+
+/**
+ * Use ThemeProvider's data-theme attribute for dark utilities
+ */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/**
+ * Import KudiFlow UI Components theme variables
+ */
+@import '@kudiflow/ui-components/styles/globals.css';
+
+/**
+ * Application-specific styles
+ * Use KudiFlow theme variables for consistency
+ */
+body {
+  background: var(--bw-colors-background-primary);
+  color: var(--bw-colors-foreground-primary);
+  font-family: var(--bw-typography-font-family-sans);
+}

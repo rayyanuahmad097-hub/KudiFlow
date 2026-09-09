@@ -1,0 +1,249 @@
+import { useState, useEffect, useCallback } from 'react';
+import { ssrLocalStorage } from '../utils/ssr';
+
+export type TransactionStatus = 'idle' | 'pending' | 'success' | 'failed' | 'partial';
+
+export interface PartialTransferInfo {
+  originalAmount: string;
+  completedAmount: string;
+  failedAmount: string;
+  completedPercentage: number;
+  failedSteps: string[];
+  succeededSteps: string[];
+}
+
+export interface RetryAttemptInfo {
+  attempt: number;
+  timestamp: number;
+  error?: string;
+}
+
+export interface RetryInfo {
+  isRetrying: boolean;
+  retryCount: number;
+  maxRetries: number;
+  attempts: RetryAttemptInfo[];
+  nextRetryAt?: number;
+}
+
+export interface TransactionState {
+  id: string;
+  status: TransactionStatus;
+  progress: number; // 0 to 100
+  step: string;
+  txHash?: string;
+  timestamp: number;
+  partialInfo?: PartialTransferInfo;
+  retryInfo?: RetryInfo;
+}
+
+const STORAGE_KEY = 'kudiflow_tx_state';
+
+export const createPartialTransferInfo = (
+  originalAmount: string,
+  completedAmount: string,
+  failedSteps: string[],
+  succeededSteps: string[]
+): PartialTransferInfo => {
+  const original = parseFloat(originalAmount || '0');
+  const completed = parseFloat(completedAmount || '0');
+  const failed = original - completed;
+  
+  return {
+    originalAmount,
+    completedAmount,
+    failedAmount: failed.toString(),
+    completedPercentage: original > 0 ? (completed / original) * 100 : 0,
+    failedSteps,
+    succeededSteps,
+  };
+};
+
+export const updatePartialTransfer = (
+  prev: TransactionState,
+  newCompletedAmount: string,
+  step: string,
+  failed: boolean
+): PartialTransferInfo | undefined => {
+  if (!prev.partialInfo) {
+    return undefined;
+  }
+  
+  const original = parseFloat(prev.partialInfo.originalAmount);
+  const currentCompleted = parseFloat(prev.partialInfo.completedAmount);
+  const newCompleted = failed ? currentCompleted : currentCompleted + parseFloat(newCompletedAmount);
+  const failedSteps = failed ? [...prev.partialInfo.failedSteps, step] : prev.partialInfo.failedSteps;
+  const succeededSteps = !failed ? [...prev.partialInfo.succeededSteps, step] : prev.partialInfo.succeededSteps;
+  
+  return createPartialTransferInfo(
+    prev.partialInfo.originalAmount,
+    newCompleted.toString(),
+    failedSteps,
+    succeededSteps
+  );
+};
+
+export const useTransactionPersistence = () => {
+  const [state, setState] = useState<TransactionState>({
+    id: '',
+    status: 'idle',
+    progress: 0,
+    step: '',
+    timestamp: 0,
+  });
+
+  // Load from storage on mount
+  useEffect(() => {
+    const stored = ssrLocalStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        // Optional: Expiry check (e.g. 24h)
+        if (Date.now() - parsed.timestamp < 24 * 60 * 60 * 1000) {
+          setState(parsed);
+        } else {
+          ssrLocalStorage.removeItem(STORAGE_KEY);
+        }
+      } catch (e) {
+        console.error('Failed to load transaction state', e);
+      }
+    }
+  }, []);
+
+  // Save to storage whenever state changes
+  useEffect(() => {
+    if (state.status === 'idle') {
+      // We might want to clear it if it's explicitly idle, or keep it if it's "history"
+      // For now, let's only clear if we explicitly want to reset.
+      // But if the user starts a new one, it overwrites.
+      return;
+    }
+
+    // If completed/failed, we might want to keep it generic for a bit
+    // But persistence is key.
+    ssrLocalStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state]);
+
+  const updateState = useCallback((updates: Partial<TransactionState>) => {
+    setState((prev: TransactionState) => ({ ...prev, ...updates, timestamp: Date.now() }));
+  }, []);
+
+  const clearState = useCallback(() => {
+    setState({
+      id: '',
+      status: 'idle',
+      progress: 0,
+      step: '',
+      timestamp: 0,
+    });
+    ssrLocalStorage.removeItem(STORAGE_KEY);
+  }, []);
+
+  const startTransaction = useCallback((id: string, originalAmount?: string) => {
+    const partialInfo = originalAmount 
+      ? createPartialTransferInfo(originalAmount, '0', [], [])
+      : undefined;
+    setState({
+      id,
+      status: 'pending',
+      progress: 0,
+      step: 'Initializing...',
+      timestamp: Date.now(),
+      partialInfo,
+    });
+  }, []);
+
+  const markPartialSuccess = useCallback((completedAmount: string, step: string) => {
+    setState((prev: TransactionState) => {
+      if (!prev.partialInfo) return prev;
+      
+      const newPartialInfo = updatePartialTransfer(prev, completedAmount, step, false);
+      return {
+        ...prev,
+        status: 'partial',
+        partialInfo: newPartialInfo,
+        timestamp: Date.now(),
+      };
+    });
+  }, []);
+
+  const markPartialFailure = useCallback((step: string) => {
+    setState((prev: TransactionState) => {
+      if (!prev.partialInfo) return prev;
+      
+      const newPartialInfo = updatePartialTransfer(prev, '0', step, true);
+      return {
+        ...prev,
+        status: 'partial',
+        partialInfo: newPartialInfo,
+        timestamp: Date.now(),
+      };
+    });
+  }, []);
+
+  const startRetry = useCallback((maxRetries: number = 3, backoffMs: number = 1000) => {
+    setState((prev: TransactionState) => ({
+      ...prev,
+      retryInfo: {
+        isRetrying: true,
+        retryCount: (prev.retryInfo?.retryCount || 0) + 1,
+        maxRetries,
+        attempts: prev.retryInfo?.attempts || [],
+        nextRetryAt: undefined,
+      },
+      status: 'pending',
+      step: `Retrying... (Attempt ${(prev.retryInfo?.retryCount || 0) + 1}/${maxRetries})`,
+      timestamp: Date.now(),
+    }));
+  }, []);
+
+  const logRetryAttempt = useCallback((error?: string) => {
+    setState((prev: TransactionState) => {
+      if (!prev.retryInfo) return prev;
+      
+      const newAttempts: RetryAttemptInfo[] = [
+        ...prev.retryInfo.attempts,
+        {
+          attempt: prev.retryInfo.retryCount,
+          timestamp: Date.now(),
+          error,
+        },
+      ];
+
+      return {
+        ...prev,
+        retryInfo: {
+          ...prev.retryInfo,
+          isRetrying: false,
+          attempts: newAttempts,
+        },
+        timestamp: Date.now(),
+      };
+    });
+  }, []);
+
+  const markRetrySuccess = useCallback(() => {
+    setState((prev: TransactionState) => ({
+      ...prev,
+      status: 'success',
+      retryInfo: prev.retryInfo ? {
+        ...prev.retryInfo,
+        isRetrying: false,
+      } : undefined,
+      step: 'Transaction completed successfully',
+      timestamp: Date.now(),
+    }));
+  }, []);
+
+  return {
+    state,
+    updateState,
+    clearState,
+    startTransaction,
+    markPartialSuccess,
+    markPartialFailure,
+    startRetry,
+    logRetryAttempt,
+    markRetrySuccess,
+  };
+};
