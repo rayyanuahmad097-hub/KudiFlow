@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "baseUrl": ".",
+    "declaration": true,
+    "outDir": "./dist",
+    "rootDir": "."
+  },
+  "include": [
+    "api/src/**/*.ts",
+    "web/**/*.ts",
+    "docs/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.e2e-spec.ts",
+    "node_modules",
+    "api/dist",
+    "web/dist",
+    "docs/dist",
+    "web/.next"
+  ]
+}

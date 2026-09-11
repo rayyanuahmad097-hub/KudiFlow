@@ -1,0 +1,84 @@
+.app-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.page-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.page-header h1 {
+  margin: 0;
+}
+
+.page-nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.page-nav a {
+  color: #1f2937;
+  text-decoration: none;
+  padding: 0.75rem 1.2rem;
+  border-radius: 9999px;
+  background: #e5e7eb;
+  transition: background 200ms ease;
+}
+
+.page-nav a.active,
+.page-nav a:hover {
+  background: #6366f1;
+  color: white;
+}
+
+.page-section {
+  padding: 2rem;
+  border: 1px solid #d1d5db;
+  border-radius: 24px;
+  background: #ffffff;
+}
+
+.logo-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 2rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  transition: filter 300ms;
+}
+
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+.card {
+  padding: 2em;
+}
+
+.page-section ul {
+  list-style: disc;
+  padding-left: 1.2rem;
+  margin: 1rem 0 0 0;
+}
+
+.page-section a {
+  color: #4f46e5;
+}
